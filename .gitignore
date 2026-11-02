@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# Les données brutes et les représentations calculées : trop lourdes, et
+# reproductibles à partir du zip Flipkart et du notebook
+data/
+
+# Les fichiers Word intermédiaires : on livre les PDF
+livrables/*.docx
+~$*
