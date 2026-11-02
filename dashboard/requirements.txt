@@ -1,0 +1,19 @@
+# Les packages du dashboard, et seulement eux.
+# Versions figées, identiques à celles de l'entraînement : en particulier
+# scikit-learn, car un classifieur enregistré avec une version n'est garanti
+# que dans cette même version.
+#
+# PyTorch en version processeur (« +cpu »), servie par le dépôt de PyTorch :
+# le serveur de Streamlit Cloud n'a pas de carte graphique, et la version
+# standard embarque plusieurs Go de bibliothèques CUDA inutiles.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
+transformers==5.18.0
+scikit-learn==1.9.1
+numpy==2.5.2
+pandas==3.0.6
+pillow==12.3.0
+matplotlib==3.11.2
+plotly==7.1.0
+streamlit==1.65.0

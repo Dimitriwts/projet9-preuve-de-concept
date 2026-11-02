@@ -1,0 +1,13 @@
+# Thème clair à fort contraste (WCAG 1.4.3) : texte presque noir sur blanc
+# (17:1), couleur d'accent bleu foncé (8,4:1).
+[theme]
+base = "light"
+primaryColor = "#0B4F8A"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#1A1A1A"
+font = "sans serif"
+
+[server]
+# Taille maximale d'une photo envoyée, en Mo
+maxUploadSize = 15

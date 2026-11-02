@@ -1,0 +1,41 @@
+{
+  "categories": [
+    "Baby Care",
+    "Beauty and Personal Care",
+    "Computers",
+    "Home Decor & Festive Needs",
+    "Home Furnishing",
+    "Kitchen & Dining",
+    "Watches"
+  ],
+  "nouveau_modele": {
+    "nom": "DINOv2 ViT-B/14",
+    "hugging_face": "facebook/dinov2-base",
+    "C": 0.03
+  },
+  "baseline": {
+    "nom": "MobileNetV2",
+    "torchvision": "mobilenet_v2 / IMAGENET1K_V1",
+    "C": 0.001
+  },
+  "preparation": {
+    "taille": 224,
+    "fond": "blanc",
+    "moyenne": [
+      0.48500001430511475,
+      0.4560000002384186,
+      0.4059999883174896
+    ],
+    "ecart_type": [
+      0.2290000021457672,
+      0.2240000069141388,
+      0.22499999403953552
+    ]
+  },
+  "scores_validation_croisee": {
+    "MobileNetV2": 0.8305,
+    "ResNet50": 0.879,
+    "DINOv2 ViT-S/14": 0.9029,
+    "DINOv2 ViT-B/14": 0.9257
+  }
+}

@@ -1,0 +1,6 @@
+comparaison,seul A juste (b),seul B juste (c),écart (points),IC 95 % de l'écart,p-valeur McNemar,p-valeur corrigée (Bonferroni),significatif au seuil de 5 %
+DINOv2 ViT-B/14  vs  MobileNetV2,16,116,9.5,[+7.4 ; +11.6],6.691287683282994e-20,3.345643841641497e-19,oui
+DINOv2 ViT-B/14  vs  ResNet50,20,69,4.7,[+3.0 ; +6.4],1.7769640600713887e-07,8.884820300356944e-07,oui
+DINOv2 ViT-S/14  vs  ResNet50,24,49,2.4,[+0.9 ; +3.9],0.004626293921895512,0.02313146960947756,oui
+DINOv2 ViT-S/14  vs  MobileNetV2,18,94,7.2,[+5.2 ; +9.2],1.3432499592767575e-13,6.716249796383788e-13,oui
+DINOv2 ViT-B/14  vs  DINOv2 ViT-S/14,12,36,2.3,[+1.1 ; +3.6],0.0007172696733945829,0.0035863483669729143,oui
