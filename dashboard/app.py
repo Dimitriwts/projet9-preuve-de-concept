@@ -41,24 +41,36 @@ acc.declarer_langue()
 
 # --- Les données, chargées une seule fois -------------------------------------
 
+# Piège rencontré au redéploiement : st.cache_data ne se vide que si le code de la fonction change,
+# pas quand le fichier lu change. Après un nouvel export du notebook, le serveur en ligne servait
+# encore l'ancien fichier, avec l'ancien nom de modèle, et la page des performances plantait
+# (KeyError). La date de modification du fichier est donc passée en argument : un fichier
+# modifié donne un nouvel argument, et le cache est recalculé.
 @st.cache_data
-def charger_catalogue():
+def charger_catalogue(date_modification):
     catalogue = pd.read_csv(DOSSIER_MODELE / "predictions_hors_pli.csv")
     catalogue["ratio"] = (catalogue["largeur"] / catalogue["hauteur"]).round(2)
     return catalogue
 
 
 @st.cache_resource(show_spinner="Chargement des modèles (DINOv2 et MobileNetV2)…")
-def charger_predicteur():
-    from modele import Predicteur
-    return Predicteur()
+def charger_predicteur(date_modification):
+    """Même piège que charger_catalogue : la date du classifieur exporté sert de clé de cache.
+
+    Le module modele est aussi rechargé, sinon Python garderait en mémoire l'ancienne version
+    de son code et de sa configuration (nom du modèle Hugging Face, nombre de registres).
+    """
+    import importlib
+    import modele
+    importlib.reload(modele)
+    return modele.Predicteur()
 
 
 def miniature(nom_image: str) -> Image.Image:
     return Image.open(DOSSIER_MINIATURES / nom_image).convert("RGB")
 
 
-catalogue = charger_catalogue()
+catalogue = charger_catalogue((DOSSIER_MODELE / "predictions_hors_pli.csv").stat().st_mtime)
 CATEGORIES = sorted(catalogue["categorie"].unique())
 COULEUR = dict(zip(CATEGORIES, acc.PALETTE_CATEGORIES))
 MOTIF = dict(zip(CATEGORIES, acc.MOTIFS))
@@ -218,7 +230,8 @@ def page_prediction():
         image = Image.open(fichier).convert("RGB")
 
     with st.spinner("Prédiction en cours…"):
-        resultat = charger_predicteur().predire(image)
+        resultat = charger_predicteur(
+            (DOSSIER_MODELE / "classifieur_dinov2.joblib").stat().st_mtime).predire(image)
 
     prediction = max(resultat["dinov2"], key=resultat["dinov2"].get)
     confiance = resultat["dinov2"][prediction]
