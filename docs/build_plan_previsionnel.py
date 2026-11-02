@@ -19,7 +19,7 @@ RACINE = Path(__file__).resolve().parent.parent
 MODELE = glob.glob(str(RACINE / "docs" / "modeles" / "*Plan_pr*.docx"))[0]
 SORTIE_DOCX = RACINE / "livrables" / "Wyts_Dimitri_1_plan_travail_102026.docx"
 
-TAILLE_TEXTE = Pt(9.5)
+TAILLE_TEXTE = Pt(9.25)
 
 
 # --- Le contenu --------------------------------------------------------------
@@ -37,7 +37,7 @@ SECTIONS = {
          (" (150 images chacune) : Baby Care, Beauty and Personal Care, Computers, "
           "Home Decor & Festive Needs, Home Furnishing, Kitchen & Dining, Watches. "
           "Je n'utilise que les images, très hétérogènes (de 145 à plus de 11 000 pixels "
-          "de côté, fonds studio ou mises en scène). Enjeu métier : ranger "
+          "de côté). Enjeu métier : ranger "
           "automatiquement un nouvel article à partir de sa seule photo.", False)],
     ],
     "Modèle envisagé": [
@@ -49,9 +49,11 @@ SECTIONS = {
           "automatiquement. Il produit une représentation générale de l'image, "
           "utilisable telle quelle (modèle gelé) pour classer, rechercher des images "
           "similaires ou segmenter. Il vise les cas où les données étiquetées sont "
-          "rares, comme ici avec quelques centaines d'images par entraînement.", False)],
+          "rares, comme ici avec quelques centaines d'images par entraînement. J'utilise sa "
+          "variante avec registres (même équipe, septembre 2023), qui corrige des artefacts "
+          "dans ses cartes d'attention.", False)],
         [("• Plus performant : ", True), ("sur ImageNet, une simple couche linéaire posée sur "
-          "DINOv2 ViT-B/14 gelé atteint 84,5 % de bonnes réponses, contre 71,9 % "
+          "DINOv2 ViT-B/14 avec registres gelé atteint 84,6 % de bonnes réponses, contre 71,9 % "
           "pour MobileNetV2 pourtant entraîné de bout en bout (chiffres publiés par "
           "Meta et par torchvision pour les poids utilisés ici). Les auteurs montrent "
           "aussi qu'il dépasse OpenCLIP, la meilleure représentation généraliste "
@@ -59,8 +61,8 @@ SECTIONS = {
         [("• Adapté au projet : ", True), ("pas de réentraînement du réseau, donc compatible avec "
           "un petit jeu de données et une machine modeste ; poids libres (licence "
           "Apache 2.0) sur Hugging Face.", False)],
-        [("• Interprétable : ", True), ("ses cartes d'attention localisent l'objet sans "
-          "supervision, ce qui servira à expliquer chaque prédiction.", False)],
+        [("• Interprétable : ", True), ("ses cartes d'attention montrent où le modèle regarde, "
+          "ce qui servira à expliquer chaque prédiction.", False)],
     ],
     "Références bibliographiques": [
         [("1. Oquab M. et al. (2023), ", False),
@@ -71,11 +73,12 @@ SECTIONS = {
          ("Emerging Properties in Self-Supervised Vision Transformers", True),
          (" (DINO), arXiv:2104.14294 : le principe de l'auto-distillation et des "
           "cartes d'attention.", False)],
-        [("3. Sandler M. et al. (2018), ", False),
-         ("MobileNetV2: Inverted Residuals and Linear Bottlenecks", True),
-         (", arXiv:1801.04381 : l'architecture de la baseline.", False)],
+        [("3. Darcet T. et al. (2023), ", False),
+         ("Vision Transformers Need Registers", True),
+         (", arXiv:2309.16588 : l'origine des artefacts d'attention et leur correction "
+          "par des registres.", False)],
         [("Code réutilisé : l'exemple d'extraction de la fiche Hugging Face "
-          "facebook/dinov2-base et le chargement des données de mon projet 6. "
+          "facebook/dinov2-with-registers-base et le chargement des données de mon projet 6. "
           "L'application, elle, est originale (jeu Flipkart).", False)],
     ],
     "Démarche de test du nouvel algorithme (preuve de concept)": [
@@ -83,15 +86,15 @@ SECTIONS = {
          ("MobileNetV2 pré-entraîné sur ImageNet, gelé, surmonté d'un classifieur. "
           "C'est l'approche retenue au projet 6 (82,4 % de bonnes réponses), "
           "reproduite dans le même notebook que le nouveau modèle. "
-          "J'ajoute ResNet50 (23,5 M de paramètres) et DINOv2 ViT-S/14 (22,1 M) : à taille "
+          "J'ajoute ResNet50 (23,5 M de paramètres) et DINOv2 ViT-S/14 avec registres (22,1 M) : à taille "
           "comparable, ils montrent si le gain vient de la méthode et pas seulement de la "
           "taille du modèle.", False)],
         [("• Nouvelle méthode : ", True),
-         ("DINOv2 ViT-B/14 gelé, surmonté du même classifieur (régression "
+         ("DINOv2 ViT-B/14 avec registres, gelé, surmonté du même classifieur (régression "
           "logistique). Mêmes images, même préparation : seule la représentation "
           "de l'image change, la comparaison est donc équitable.", False)],
         [("• Évaluation : ", True),
-         ("validation croisée stratifiée en 5 plis, les réglages étant choisis à "
+         ("validation croisée stratifiée et groupée en 5 plis (les quasi-doublons restent ensemble), les réglages étant choisis à "
           "l'intérieur de chaque pli. Chaque image est prédite une fois par un "
           "modèle qui ne l'a jamais vue, ce qui permet un test de McNemar sur les "
           "1 050 images. Métrique principale : l'exactitude (classes équilibrées), "
@@ -101,7 +104,7 @@ SECTIONS = {
          ("cartes d'attention et occlusion pour expliquer une image (locale), "
           "moyennes par catégorie (globale).", False)],
         [("• Démonstration : ", True),
-         ("dashboard Streamlit déployé sur Hugging Face Spaces : analyse exploratoire, "
+         ("dashboard Streamlit déployé sur Streamlit Community Cloud : analyse exploratoire, "
           "choix ou envoi d'une image, prédiction des deux modèles, critères "
           "d'accessibilité WCAG.", False)],
     ],
