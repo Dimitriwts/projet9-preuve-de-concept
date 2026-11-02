@@ -9,9 +9,9 @@
     "Watches"
   ],
   "nouveau_modele": {
-    "nom": "DINOv2 ViT-B/14",
-    "hugging_face": "facebook/dinov2-base",
-    "C": 0.03
+    "nom": "DINOv2-reg ViT-B/14",
+    "hugging_face": "facebook/dinov2-with-registers-base",
+    "C": 0.003
   },
   "baseline": {
     "nom": "MobileNetV2",
@@ -35,7 +35,100 @@
   "scores_validation_croisee": {
     "MobileNetV2": 0.8305,
     "ResNet50": 0.879,
-    "DINOv2 ViT-S/14": 0.9029,
-    "DINOv2 ViT-B/14": 0.9257
+    "DINOv2-reg ViT-S/14": 0.8981,
+    "DINOv2-reg ViT-B/14": 0.9276
+  },
+  "interpretabilite": {
+    "surface_produit": 0.54,
+    "attention_sur_produit": 0.888
+  },
+  "doublons": {
+    "paires": 258,
+    "paires_categories_differentes": 13,
+    "groupes": 933
+  },
+  "continuite_projet6": {
+    "MobileNetV2": 0.8667,
+    "ResNet50": 0.8429,
+    "DINOv2-reg ViT-S/14": 0.9095,
+    "DINOv2-reg ViT-B/14": 0.9286
+  },
+  "registres": [
+    {
+      "modèle": "facebook/dinov2-base",
+      "registres": 0,
+      "surface du produit": 0.5299,
+      "attention sur le produit": 0.6372,
+      "attention sur le coin haut-gauche": 0.1511,
+      "attention sur les 5 patchs les plus regardés": 0.3128
+    },
+    {
+      "modèle": "facebook/dinov2-with-registers-base",
+      "registres": 4,
+      "surface du produit": 0.5299,
+      "attention sur le produit": 0.8888,
+      "attention sur le coin haut-gauche": 0.0008,
+      "attention sur les 5 patchs les plus regardés": 0.1312
+    }
+  ],
+  "c_choisis": {
+    "MobileNetV2": [
+      0.001,
+      0.001,
+      0.01,
+      0.001,
+      0.01
+    ],
+    "ResNet50": [
+      1.0,
+      0.003,
+      0.003,
+      0.003,
+      0.003
+    ],
+    "DINOv2-reg ViT-S/14": [
+      0.01,
+      0.003,
+      0.3,
+      0.01,
+      0.003
+    ],
+    "DINOv2-reg ViT-B/14": [
+      0.01,
+      0.003,
+      0.003,
+      0.001,
+      0.003
+    ]
+  },
+  "scores_plis": {
+    "MobileNetV2": [
+      0.819,
+      0.819,
+      0.819,
+      0.8571,
+      0.8381
+    ],
+    "ResNet50": [
+      0.8571,
+      0.881,
+      0.9048,
+      0.9,
+      0.8524
+    ],
+    "DINOv2-reg ViT-S/14": [
+      0.881,
+      0.919,
+      0.8857,
+      0.9381,
+      0.8667
+    ],
+    "DINOv2-reg ViT-B/14": [
+      0.9381,
+      0.9238,
+      0.9381,
+      0.9524,
+      0.8857
+    ]
   }
 }

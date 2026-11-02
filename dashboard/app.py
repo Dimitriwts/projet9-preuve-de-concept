@@ -262,12 +262,13 @@ def page_prediction():
                       use_container_width=True)
     carte = resultat["attention"]
     centre = carte[4:12, 4:12].mean() / carte.mean()
-    # Formulation volontairement prudente : sur les 1 050 images (notebook, section 6), le produit
-    # occupe 54 % de l'image et reçoit 64 % de l'attention, une concentration réelle mais modeste.
+    # Les chiffres du catalogue viennent du notebook (section 6), via configuration.json
+    from modele import CONFIGURATION
+    globale = CONFIGURATION["interpretabilite"]
     st.markdown(f"**À retenir :** sur cette image, l'attention au centre est {nombre(centre)} fois "
-                "l'attention moyenne. Sur l'ensemble du catalogue, le produit occupe 54 % de l'image et reçoit "
-                "64 % de l'attention de DINOv2 : le modèle regarde un peu plus le produit que le fond, sans "
-                "l'isoler complètement.")
+                f"l'attention moyenne. Sur l'ensemble du catalogue, le produit occupe "
+                f"{pct(globale['surface_produit'], 0)} de l'image et reçoit "
+                f"{pct(globale['attention_sur_produit'], 0)} de l'attention de DINOv2.")
 
 
 # =============================================================================

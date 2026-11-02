@@ -63,6 +63,8 @@ class Predicteur:
             weights=tv_models.MobileNet_V2_Weights.IMAGENET1K_V1).features.eval()
         # joblib repose sur pickle, qui peut exécuter du code au chargement : on ne
         # charge que les fichiers produits par notre notebook et livrés avec l'application.
+        # Position du premier patch : après [CLS] et les registres (4 pour DINOv2 avec registres)
+        self.debut_patchs = 1 + self.dinov2.config.num_register_tokens
         self.classifieur_dinov2 = joblib.load(DOSSIER_MODELE / "classifieur_dinov2.joblib")
         self.classifieur_mobilenet = joblib.load(DOSSIER_MODELE / "classifieur_mobilenetv2.joblib")
 
@@ -70,7 +72,7 @@ class Predicteur:
     def representation_dinov2(self, lot):
         sortie = self.dinov2(pixel_values=lot, output_attentions=True)
         jetons = sortie.last_hidden_state
-        X = torch.cat([jetons[:, 0], jetons[:, 1:].mean(dim=1)], dim=1).numpy()
+        X = torch.cat([jetons[:, 0], jetons[:, self.debut_patchs:].mean(dim=1)], dim=1).numpy()
         return X, sortie.attentions[-1]
 
     @torch.no_grad()
@@ -85,7 +87,7 @@ class Predicteur:
         X_mobile = self.mobilenet(lot).mean(dim=(2, 3)).numpy()
         probas_mobilenet = self.classifieur_mobilenet.predict_proba(X_mobile)[0]
 
-        attention = attentions[0, :, 0, 1:].mean(dim=0)
+        attention = attentions[0, :, 0, self.debut_patchs:].mean(dim=0)
         cote = int(attention.numel() ** 0.5)
         carte = attention.reshape(cote, cote).numpy()
         carte = carte / carte.max()
