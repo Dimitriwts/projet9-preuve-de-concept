@@ -33,19 +33,19 @@
 # |---|---|---|---|---|
 # | Baseline 1 | MobileNetV2 | 2018 | 2,2 M | supervisé, ImageNet (1,3 M images étiquetées) |
 # | Baseline 2 | ResNet50 | 2015 | 23,5 M | supervisé, ImageNet |
-# | Nouveau, petit | DINOv2 ViT-S/14 | 2023 | 22,1 M | auto-supervisé, 142 M images sans étiquettes |
-# | Nouveau, base | DINOv2 ViT-B/14 | 2023 | 86,6 M | auto-supervisé, 142 M images sans étiquettes |
+# | Nouveau, petit | DINOv2-reg ViT-S/14 | 2023 | 22,1 M | auto-supervisé, 142 M images sans étiquettes |
+# | Nouveau, base | DINOv2-reg ViT-B/14 | 2023 | 86,6 M | auto-supervisé, 142 M images sans étiquettes |
 #
 # Les paramètres sont ceux réellement utilisés, mesurés en section 3 : pour MobileNetV2 et ResNet50, on
 # retire la couche de classification d'ImageNet (1 000 catégories) qui ne sert pas ici. Avec elle, ils
 # comptent 3,5 M et 25,6 M de paramètres, les chiffres habituellement cités.
 #
 # MobileNetV2 est la baseline du projet 6. ResNet50 est ajouté pour une raison précise : il a à peu près
-# la taille de DINOv2 ViT-S/14. Si DINOv2-S bat ResNet50, le gain ne vient pas simplement d'un modèle
-# plus gros, mais bien de la méthode.
+# la taille de DINOv2-reg ViT-S/14. La comparaison des deux pose la question : le gain vient-il de la
+# méthode, ou simplement d'un modèle plus gros ? La section 5 y répond avec un test statistique.
 #
 # **Code réutilisé** : le chargement du jeu Flipkart reprend mon notebook du projet 6 ; l'extraction des
-# représentations DINOv2 suit l'exemple de la fiche Hugging Face `facebook/dinov2-base`.
+# représentations DINOv2 suit l'exemple de la fiche Hugging Face `facebook/dinov2-with-registers-base`.
 
 # %% [markdown]
 # ## 0. L'environnement
@@ -316,7 +316,15 @@ print("Tenseur des images :", tuple(tenseurs.shape),
 #   que Meta publie avec DINOv2 (fichier `dinov2/hub/classifiers.py` du dépôt officiel, version à une
 #   couche) : on reprend donc la façon dont les auteurs eux-mêmes branchent un classifieur sur le modèle.
 #
-# On mesure au passage le temps de calcul par image, qui fera partie de la comparaison.
+# On utilise la variante de DINOv2 avec registres (Darcet et al., « Vision Transformers Need Registers »,
+# 2023, même équipe Meta). Piège rencontré à la première exécution : avec la version sans registres, les
+# cartes d'attention montraient surtout le coin en haut à gauche et quelques points du fond blanc. Mesuré
+# sur 42 images : un seul patch de fond, celui du coin, captait 15,1 % de l'attention. C'est l'artefact
+# décrit par cet article : le modèle détourne quelques patchs de fond peu informatifs pour y stocker des
+# informations globales. La variante avec registres ajoute 4 jetons prévus pour ce rôle ; sur les mêmes
+# 42 images, le patch du coin ne reçoit plus que 0,1 % de l'attention et le produit en reçoit 89 %, contre
+# 64 % sans registres. Les explications de la section 6 ne seraient pas fiables sans ce changement.
+#
 
 # %%
 class ReseauConvolutif(torch.nn.Module):
@@ -336,22 +344,26 @@ class ReseauConvolutif(torch.nn.Module):
 
 
 class DINOv2(torch.nn.Module):
-    """DINOv2 de Hugging Face ; renvoie [CLS] concaténé à la moyenne des patchs."""
+    """DINOv2 avec registres (Hugging Face) ; renvoie [CLS] concaténé à la moyenne des 256 patchs."""
 
     def __init__(self, nom_hf):
         super().__init__()
         self.reseau = AutoModel.from_pretrained(nom_hf)
+        # Les jetons sortent dans l'ordre : [CLS], puis les registres (4 ici), puis les 256 patchs.
+        # Les registres ne correspondent à aucun morceau de l'image : on les écarte de la moyenne.
+        self.nb_registres = self.reseau.config.num_register_tokens
 
     def forward(self, x):
-        jetons = self.reseau(pixel_values=x).last_hidden_state   # (lot, 1 + 256, dimension)
-        return torch.cat([jetons[:, 0], jetons[:, 1:].mean(dim=1)], dim=1)
+        jetons = self.reseau(pixel_values=x).last_hidden_state   # (lot, 1 + 4 + 256, dimension)
+        patchs = jetons[:, 1 + self.nb_registres:]
+        return torch.cat([jetons[:, 0], patchs.mean(dim=1)], dim=1)
 
 
 MODELES = {
     "MobileNetV2": dict(role="baseline", construire=lambda: ReseauConvolutif("mobilenet_v2")),
     "ResNet50": dict(role="baseline", construire=lambda: ReseauConvolutif("resnet50")),
-    "DINOv2 ViT-S/14": dict(role="nouveau", construire=lambda: DINOv2("facebook/dinov2-small")),
-    "DINOv2 ViT-B/14": dict(role="nouveau", construire=lambda: DINOv2("facebook/dinov2-base")),
+    "DINOv2-reg ViT-S/14": dict(role="nouveau", construire=lambda: DINOv2("facebook/dinov2-with-registers-small")),
+    "DINOv2-reg ViT-B/14": dict(role="nouveau", construire=lambda: DINOv2("facebook/dinov2-with-registers-base")),
 }
 
 
@@ -364,45 +376,75 @@ def extraire(reseau, images, taille_lot=32):
     return torch.cat(sorties).numpy()
 
 
-@torch.no_grad()
-def temps_par_image(reseau, nb_images=32, repetitions=3):
-    """Temps moyen pour une image seule, sur processeur, comme dans le dashboard."""
-    reseau.eval().to("cpu")
-    une_image = tenseurs[:1]
-    reseau(une_image)                              # un premier passage « à vide »
-    debut = time.perf_counter()
-    for _ in range(repetitions):
-        for i in range(nb_images // repetitions + 1):
-            reseau(tenseurs[i:i + 1])
-    return (time.perf_counter() - debut) / (repetitions * (nb_images // repetitions + 1))
-
-
-representations, fiches = {}, []
+representations, reseaux, fiches = {}, {}, []
 for nom, info in MODELES.items():
     fichier = DOSSIER_TRAVAIL / f"representations_{nom.replace('/', '-').replace(' ', '_')}.npy"
     reseau = info["construire"]()
-    nb_parametres = sum(p.numel() for p in reseau.parameters())
     # Les représentations sont mises en cache : relancer le notebook ne refait pas les
-    # extractions (plusieurs minutes chacune). La durée mesurée est gardée dans un petit
-    # fichier .json à côté, pour que le tableau l'affiche aussi lors d'une relance.
-    fichier_duree = fichier.with_suffix(".json")
-    if fichier.exists() and fichier_duree.exists():
+    # extractions, qui prennent plusieurs minutes chacune.
+    if fichier.exists():
         X = np.load(fichier)
-        duree = json.loads(fichier_duree.read_text())["duree_s"]
     else:
-        debut = time.perf_counter()
         X = extraire(reseau, tenseurs)
-        duree = time.perf_counter() - debut
         np.save(fichier, X)
-        fichier_duree.write_text(json.dumps({"duree_s": duree}))
     representations[nom] = X
+    reseaux[nom] = reseau.eval()
     fiches.append({"modèle": nom, "rôle": info["role"],
-                   "paramètres (M)": round(nb_parametres / 1e6, 1),
-                   "dimension": X.shape[1],
-                   "extraction des 1 050 images (s)": round(duree, 1),
-                   "temps par image, CPU (ms)": round(1000 * temps_par_image(reseau), 1)})
-    print(f"{nom:<16} → {X.shape}")
-    del reseau
+                   "paramètres (M)": round(sum(p.numel() for p in reseau.parameters()) / 1e6, 1),
+                   "dimension": X.shape[1]})
+    print(f"{nom:<20} → {X.shape}")
+
+# %% [markdown]
+# ### Le temps de prédiction d'une image
+#
+# On mesure le temps pour classer une seule image sur processeur, la situation du dashboard. Cette mesure
+# a demandé du soin.
+#
+# Piège rencontré : mesurés un modèle après l'autre, les temps changeaient du simple au triple d'une
+# exécution à l'autre (ResNet50 entre 41 et 315 ms), et ResNet50 sortait parfois plus lent que DINOv2-S,
+# ce qui n'a pas de sens vu leurs tailles. Deux causes, vérifiées par un essai à part :
+#
+# - chaque modèle était mesuré à un moment différent, donc dans un état différent de la machine (un
+#   portable ralentit quand il chauffe ou quand un autre programme travaille) ;
+# - le processeur de ce portable (Intel i7-13620H) a 6 cœurs rapides et 4 cœurs lents, et PyTorch
+#   utilise par défaut tous les cœurs : selon ceux que Windows lui attribue, un même calcul va plus ou
+#   moins vite. Mesuré deux fois de suite, DINOv2-B passait de 471 à 588 ms avec tous les cœurs, contre
+#   600 et 596 ms limité à 6 cœurs.
+#
+# La mesure retenue limite donc PyTorch à 6 cœurs, alterne les quatre modèles dans un ordre tiré au
+# hasard à chaque tour (ils subissent ainsi les mêmes conditions), répète 40 tours, et garde la médiane,
+# qui n'est pas tirée par quelques mesures aberrantes. On donne aussi le rapport avec MobileNetV2, plus
+# parlant qu'une valeur absolue qui dépend de la machine.
+
+# %%
+import random
+
+NB_COEURS_MESURE, NB_TOURS = 6, 40
+coeurs_avant = torch.get_num_threads()
+torch.set_num_threads(NB_COEURS_MESURE)
+random.seed(GRAINE)
+une_image = tenseurs[:1]
+chronos = {nom: [] for nom in reseaux}
+with torch.no_grad():
+    for nom, reseau in reseaux.items():          # quelques passages « à vide » pour chauffer les caches
+        for _ in range(3):
+            reseau(une_image)
+    for _ in range(NB_TOURS):
+        ordre = list(reseaux)
+        random.shuffle(ordre)
+        for nom in ordre:
+            debut = time.perf_counter()
+            reseaux[nom](une_image)
+            chronos[nom].append(1000 * (time.perf_counter() - debut))
+torch.set_num_threads(coeurs_avant)
+
+mediane_base = np.median(chronos["MobileNetV2"])
+for fiche in fiches:
+    mesures = chronos[fiche["modèle"]]
+    fiche["temps par image, CPU (ms)"] = round(float(np.median(mesures)), 1)
+    fiche["moitié des mesures entre (ms)"] = f"{np.percentile(mesures, 25):.0f} et {np.percentile(mesures, 75):.0f}"
+    fiche["fois plus lent que MobileNetV2"] = round(float(np.median(mesures) / mediane_base), 1)
+del reseaux
 
 fiche_modeles = pd.DataFrame(fiches).set_index("modèle")
 fiche_modeles
@@ -540,7 +582,7 @@ for nom, r in resultats.items():
         "erreurs / 1 050": int((1 - correct).sum()),
     })
 tableau = (pd.DataFrame(lignes).set_index("modèle")
-           .join(fiche_modeles[["paramètres (M)", "temps par image, CPU (ms)"]]))
+           .join(fiche_modeles[["paramètres (M)", "temps par image, CPU (ms)", "fois plus lent que MobileNetV2"]]))
 tableau.to_csv(DOSSIER_TRAVAIL / "tableau_resultats.csv")
 tableau.style.format({"exactitude": "{:.3f}", "écart-type entre plis": "{:.3f}", "F1 macro": "{:.3f}"})
 
@@ -555,11 +597,12 @@ for barre, n in zip(barres, ordre):
     ax.errorbar(barre.get_width(), barre.get_y() + barre.get_height() / 2,
                 xerr=[[barre.get_width() - min(plis_n)], [max(plis_n) - barre.get_width()]],
                 color="black", capsize=4)
-    ax.text(barre.get_width() + 0.012, barre.get_y() + barre.get_height() / 2,
-            f"{barre.get_width():.1%}", va="center", fontsize=10)
-ax.axvline(0.824, ls="--", color="#b2182b", lw=1)
-ax.text(0.824, -0.75, "projet 6 : 82,4 %", color="#b2182b", fontsize=9, ha="center")
-ax.set_xlim(0.6, 1.0)
+    # la valeur est écrite à droite de la barre d'erreur, pour ne pas la chevaucher
+    ax.text(max(plis_n) + 0.008, barre.get_y() + barre.get_height() / 2,
+            f"{100 * barre.get_width():.1f} %".replace(".", ","), va="center", fontsize=10)
+ax.axvline(0.824, ls="--", color="#b2182b", lw=1, label="projet 6, découpage unique : 82,4 %")
+ax.legend(loc="lower right", fontsize=8, frameon=False)
+ax.set_xlim(0.6, 1.02)
 ax.invert_yaxis()
 ax.set_xlabel("exactitude en validation croisée (barres : pli le plus faible et le plus fort)")
 ax.set_title("Gris : baselines   |   Bleu : DINOv2")
@@ -594,11 +637,11 @@ def comparer(nom_a, nom_b):
 
 
 comparaisons = pd.DataFrame([
-    comparer("MobileNetV2", "DINOv2 ViT-B/14"),
-    comparer("ResNet50", "DINOv2 ViT-B/14"),
-    comparer("ResNet50", "DINOv2 ViT-S/14"),          # à taille comparable
-    comparer("MobileNetV2", "DINOv2 ViT-S/14"),
-    comparer("DINOv2 ViT-S/14", "DINOv2 ViT-B/14"),   # l'apport de la taille, à méthode égale
+    comparer("MobileNetV2", "DINOv2-reg ViT-B/14"),
+    comparer("ResNet50", "DINOv2-reg ViT-B/14"),
+    comparer("ResNet50", "DINOv2-reg ViT-S/14"),          # à taille comparable
+    comparer("MobileNetV2", "DINOv2-reg ViT-S/14"),
+    comparer("DINOv2-reg ViT-S/14", "DINOv2-reg ViT-B/14"),   # l'apport de la taille, à méthode égale
 ]).set_index("comparaison")
 
 # On fait 5 tests d'un coup : avec un seuil de 5 % par test, le risque qu'au moins un test
@@ -618,10 +661,10 @@ comparaisons.style.format({"p-valeur McNemar": "{:.1e}", "p-valeur corrigée (Bo
 
 # %%
 # Le nouveau modèle retenu est fixé à l'avance, comme annoncé dans le plan prévisionnel :
-# DINOv2 ViT-B/14. On ne le choisit pas en prenant le meilleur score ci-dessus, car ces
+# DINOv2-reg ViT-B/14. On ne le choisit pas en prenant le meilleur score ci-dessus, car ces
 # scores sont nos scores de test : choisir sur eux rendrait le chiffre annoncé optimiste.
 # (ViT-S/14 sert de comparaison à taille égale avec ResNet50, pas de candidat.)
-MEILLEUR = "DINOv2 ViT-B/14"
+MEILLEUR = "DINOv2-reg ViT-B/14"
 BASELINE = "MobileNetV2"
 print("Nouveau modèle :", MEILLEUR, "| baseline :", BASELINE)
 
@@ -670,7 +713,7 @@ pd.Series(continuite, name="exactitude, découpage du projet 6 (210 images)").ro
 erreurs = np.where(resultats[MEILLEUR]["predictions"] != y)[0]
 confiance = resultats[MEILLEUR]["probabilites"].max(axis=1)
 montrer = erreurs[np.argsort(-confiance[erreurs])][:12]
-fig, axes = plt.subplots(2, 6, figsize=(18, 6.6))
+fig, axes = plt.subplots(2, 6, figsize=(18, 7.6))
 for ax, i in zip(axes.flat, montrer):
     with Image.open(df["chemin_image"].iloc[i]) as image:
         ax.imshow(carre_blanc(image))
@@ -678,9 +721,9 @@ for ax, i in zip(axes.flat, montrer):
                  f"{CATEGORIES[resultats[MEILLEUR]['predictions'][i]][:20]} ({confiance[i]:.0%})",
                  fontsize=8)
     ax.axis("off")
-plt.suptitle(f"{MEILLEUR} : les erreurs les plus « sûres d'elles »", y=1.0)
-plt.tight_layout()
-plt.savefig(DOSSIER_FIGURES / "erreurs_dinov2.png", dpi=120)
+plt.suptitle(f"{MEILLEUR} : les erreurs les plus « sûres d'elles »", y=1.02)
+plt.tight_layout(h_pad=2.5)
+plt.savefig(DOSSIER_FIGURES / "erreurs_dinov2.png", dpi=120, bbox_inches="tight")
 plt.show()
 
 # %% [markdown]
@@ -695,9 +738,9 @@ plt.show()
 #
 # 1. **L'attention du jeton [CLS]** dans la dernière couche de DINOv2. Le jeton [CLS] construit le résumé
 #    de l'image en « regardant » les 256 patchs ; le poids qu'il accorde à chacun dit où le modèle porte son
-#    attention. C'est la propriété mise en évidence par l'article DINO (2021) : sans jamais avoir vu
-#    d'étiquette, ces cartes détourent l'objet principal. Elle est gratuite à calculer, mais elle ne dit pas
-#    si la zone a poussé la décision vers la bonne catégorie.
+#    attention. L'article DINO (2021) a montré que, sans jamais avoir vu d'étiquette, ces cartes tendent à
+#    suivre l'objet principal ; on mesure plus bas dans quelle proportion c'est vrai sur nos images. Elle est
+#    gratuite à calculer, mais elle ne dit pas si la zone a poussé la décision vers la bonne catégorie.
 # 2. **L'occlusion**. On masque successivement chaque zone de l'image avec un carré gris et on mesure de
 #    combien chute la probabilité de la catégorie prédite. Une zone importante est une zone dont la
 #    disparition fait chuter la confiance. Plus coûteuse, cette méthode mesure directement l'effet sur la
@@ -708,7 +751,8 @@ plt.show()
 # pour le dashboard en section 7).
 
 # %%
-NOM_HF = {"DINOv2 ViT-S/14": "facebook/dinov2-small", "DINOv2 ViT-B/14": "facebook/dinov2-base"}[MEILLEUR]
+NOM_HF = {"DINOv2-reg ViT-S/14": "facebook/dinov2-with-registers-small",
+          "DINOv2-reg ViT-B/14": "facebook/dinov2-with-registers-base"}[MEILLEUR]
 C_FINAL = float(pd.Series(resultats[MEILLEUR]["c_choisis"]).mode().iloc[0])
 classifieur_final = nouveau_classifieur().set_params(logisticregression__C=C_FINAL)
 classifieur_final.fit(representations[MEILLEUR], y)
@@ -718,6 +762,8 @@ classifieur_base = nouveau_classifieur().set_params(logisticregression__C=C_BASE
 classifieur_base.fit(representations[BASELINE], y)
 
 dinov2 = AutoModel.from_pretrained(NOM_HF, attn_implementation="eager").eval()
+# Position du premier patch dans la suite de jetons : après [CLS] et les registres
+DEBUT_PATCHS = 1 + dinov2.config.num_register_tokens
 mobilenet = ReseauConvolutif("mobilenet_v2").eval()
 print("C retenu :", MEILLEUR, C_FINAL, "|", BASELINE, C_BASE)
 
@@ -726,7 +772,7 @@ print("C retenu :", MEILLEUR, C_FINAL, "|", BASELINE, C_BASE)
 def carte_attention(tenseur):
     """Attention du jeton [CLS] vers les 256 patchs, moyennée sur les têtes de la dernière couche."""
     sortie = dinov2(pixel_values=tenseur[None], output_attentions=True)
-    attention = sortie.attentions[-1][0, :, 0, 1:].mean(dim=0)          # (256,)
+    attention = sortie.attentions[-1][0, :, 0, DEBUT_PATCHS:].mean(dim=0)   # (256,)
     cote = int(attention.numel() ** 0.5)
     carte = attention.reshape(cote, cote).numpy()
     return carte / carte.max()
@@ -735,7 +781,7 @@ def carte_attention(tenseur):
 @torch.no_grad()
 def probabilites_dinov2(lot):
     jetons = dinov2(pixel_values=lot).last_hidden_state
-    X = torch.cat([jetons[:, 0], jetons[:, 1:].mean(dim=1)], dim=1).numpy()
+    X = torch.cat([jetons[:, 0], jetons[:, DEBUT_PATCHS:].mean(dim=1)], dim=1).numpy()
     return classifieur_final.predict_proba(X)
 
 
@@ -814,7 +860,7 @@ plt.show()
 def attentions_lot(lot):
     """Attention du [CLS] vers les patchs (dernière couche), normalisée pour sommer à 1 par image."""
     sortie = dinov2(pixel_values=lot, output_attentions=True)
-    attention = sortie.attentions[-1][:, :, 0, 1:].mean(dim=1)
+    attention = sortie.attentions[-1][:, :, 0, DEBUT_PATCHS:].mean(dim=1)
     del sortie                      # libère tout de suite les attentions des 12 couches
     cote = int(attention.shape[1] ** 0.5)
     attention = attention.reshape(-1, cote, cote)
@@ -870,12 +916,55 @@ plt.savefig(DOSSIER_FIGURES / "importance_globale_attention.png", dpi=120, bbox_
 plt.show()
 
 # %% [markdown]
+# ### Pourquoi la variante avec registres : la mesure
+#
+# On compare l'attention de DINOv2 sans registres (la version d'origine) et avec registres, sur les mêmes
+# 42 images (les 6 premières de chaque catégorie). Trois indicateurs :
+#
+# - la part de l'attention qui tombe sur le produit, à comparer avec la surface qu'il occupe ;
+# - la part captée par le seul patch du coin en haut à gauche, un patch de fond sur 256 ;
+# - la part captée par les 5 patchs les plus regardés : si elle est forte, l'attention est accaparée par
+#   quelques points au lieu d'être répartie sur l'objet.
+
+# %%
+echantillon_reg = np.concatenate([np.where(y == k)[0][:6] for k in range(len(CATEGORIES))])
+lot_reg = tenseurs[echantillon_reg]
+produit_reg = patchs_produit(lot_reg)
+
+comparaison_registres = []
+for nom_hf in ("facebook/dinov2-base", NOM_HF):
+    modele = AutoModel.from_pretrained(nom_hf, attn_implementation="eager").eval()
+    # La version sans registres n'a pas ce réglage dans sa configuration : on compte alors 0 registre
+    nb_registres = getattr(modele.config, "num_register_tokens", 0)
+    debut = 1 + nb_registres                                 # premier patch : après [CLS] et les registres
+    morceaux = []
+    with torch.no_grad():
+        for i in range(0, len(lot_reg), TAILLE_LOT_ATTENTION):
+            sortie = modele(pixel_values=lot_reg[i:i + TAILLE_LOT_ATTENTION], output_attentions=True)
+            morceaux.append(sortie.attentions[-1][:, :, 0, debut:].mean(dim=1))
+            del sortie
+    att = torch.cat(morceaux).reshape(-1, 16, 16).numpy()
+    att = att / att.sum(axis=(1, 2), keepdims=True)
+    comparaison_registres.append({
+        "modèle": nom_hf,
+        "registres": nb_registres,
+        "surface du produit": produit_reg.mean(),
+        "attention sur le produit": (att * produit_reg).sum(axis=(1, 2)).mean(),
+        "attention sur le coin haut-gauche": att[:, 0, 0].mean(),
+        "attention sur les 5 patchs les plus regardés": np.sort(att.reshape(len(att), -1), axis=1)[:, -5:].sum(axis=1).mean(),
+    })
+    del modele
+pd.DataFrame(comparaison_registres).set_index("modèle").style.format(
+    {c: "{:.1%}" for c in ["surface du produit", "attention sur le produit", "attention sur le coin haut-gauche",
+                           "attention sur les 5 patchs les plus regardés"]})
+
+# %% [markdown]
 # ### Importance globale par occlusion : quelles zones comptent, en moyenne ?
 #
 # On répète l'occlusion sur 5 images par catégorie (35 images) et on moyenne les cartes, pour DINOv2 et
 # pour la baseline. On obtient, pour chaque modèle, l'importance moyenne de chaque zone de l'image dans la
 # décision. L'occlusion coûte 50 passages dans le réseau par image : 5 images par catégorie gardent la
-# cellule autour d'un quart d'heure sur un processeur (808 s mesurées le 2 novembre).
+# cellule à une dizaine de minutes sur un processeur (durée affichée par la cellule ci-dessous).
 
 # %%
 IMAGES_PAR_CATEGORIE = 5
@@ -921,6 +1010,19 @@ configuration = {
     "preparation": {"taille": TAILLE, "fond": "blanc", "moyenne": MOYENNE_IMAGENET.tolist(),
                     "ecart_type": ECART_TYPE_IMAGENET.tolist()},
     "scores_validation_croisee": {n: round(float(tableau.loc[n, "exactitude"]), 4) for n in resultats},
+    # Chiffres de la section 6, relus par le dashboard plutôt que recopiés à la main
+    "interpretabilite": {"surface_produit": round(float(surface_produit.mean()), 3),
+                         "attention_sur_produit": round(float(attention_sur_produit.mean()), 3)},
+    # Les autres chiffres cités dans la note et la présentation, pour qu'aucun ne soit recopié à la main
+    "doublons": {"paires": int(len(paires)),
+                 "paires_categories_differentes": int(sum(df["categorie"].iloc[i] != df["categorie"].iloc[j]
+                                                          for i, j in paires)),
+                 "groupes": int(len(np.unique(groupes)))},
+    "continuite_projet6": {n: round(float(v), 4) for n, v in continuite.items()},
+    "registres": [{k: (round(float(v), 4) if isinstance(v, (float, np.floating)) else v) for k, v in ligne.items()}
+                  for ligne in comparaison_registres],
+    "c_choisis": {n: resultats[n]["c_choisis"] for n in resultats},
+    "scores_plis": {n: [round(float(s), 4) for s in resultats[n]["scores_plis"]] for n in resultats},
 }
 (DOSSIER_MODELE / "configuration.json").write_text(json.dumps(configuration, indent=2, ensure_ascii=False),
                                                    encoding="utf-8")
@@ -947,6 +1049,7 @@ print(sorted(p.name for p in DOSSIER_MODELE.iterdir()))
 #
 # - le score de chaque représentation, à protocole identique et en validation croisée imbriquée ;
 # - la significativité de l'écart entre la baseline et DINOv2 (McNemar, image par image) ;
-# - le gain à taille de modèle comparable (ResNet50 contre DINOv2 ViT-S/14), qui isole l'apport de la méthode ;
+# - l'écart à taille de modèle comparable (ResNet50 contre DINOv2-reg ViT-S/14), et s'il est ou non
+#   distinguable du bruit avec 1 050 images ;
 # - le coût du gain : nombre de paramètres et temps de prédiction ;
 # - où le modèle regarde, image par image et en moyenne par catégorie.
